@@ -1,0 +1,517 @@
+import React, { useState, useRef } from 'react';
+import { Download, Palette, Image as ImageIcon, Upload, AlertCircle, Plus, Trash2, ChevronLeft, ChevronRight, Layers, Loader2 } from 'lucide-react';
+
+const App = () => {
+// State Global
+const [bgColor, setBgColor] = useState('#151D7C');
+const [textColor, setTextColor] = useState('#ffffff');
+const [profileImg, setProfileImg] = useState(null);
+const [watermarkImg, setWatermarkImg] = useState(null);
+
+// FIXED FONT SIZE 20px
+const fixedFontSize = 20;
+
+// LIMITS CONSTANTS
+const limitNoImage = 380;
+const limitWithImage = 90;
+
+// State Multi-Slide
+const [slides, setSlides] = useState([
+{ id: 1, text: 'Halaman 1: Mode teks standar dengan batas 380 karakter. Jika Anda menambahkan gambar, batas ini akan otomatis berubah menjadi 90 karakter.', image: null }
+]);
+const [activeSlide, setActiveSlide] = useState(0);
+
+const [isGenerating, setIsGenerating] = useState(false);
+
+const canvasRef = useRef(null);
+const accountName = "JukiMedia";
+
+const colorPalette = [
+'#151D7C', '#B11226', '#F2C94C', '#0F0F14', '#F4F6FA', '#D16BA5', '#1F7A6B'
+];
+
+// --- HELPER: GET CURRENT LIMIT ---
+const getCurrentLimit = (slide) => {
+return slide.image ? limitWithImage : limitNoImage;
+};
+
+// --- SLIDE MANAGEMENT ---
+const addSlide = () => {
+const newId = slides.length + 1;
+setSlides([...slides, { id: newId, text: '', image: null }]);
+setActiveSlide(slides.length);
+};
+
+const removeSlide = (index) => {
+if (slides.length === 1) return;
+const newSlides = slides.filter((_, i) => i !== index);
+setSlides(newSlides);
+setActiveSlide(prev => (prev >= newSlides.length ? newSlides.length - 1 : prev));
+};
+
+const updateSlideContent = (key, value) => {
+const newSlides = [...slides];
+newSlides[activeSlide][key] = value;
+setSlides(newSlides);
+};
+
+// Handler khusus untuk upload gambar agar bisa memotong teks otomatis
+const handleContentImageUpload = (e) => {
+const file = e.target.files[0];
+if (file) {
+const reader = new FileReader();
+reader.onload = (ev) => {
+const newImage = ev.target.result;
+const newSlides = [...slides];
+
+// Update Gambar
+newSlides[activeSlide].image = newImage;
+
+// Cek dan Potong Teks jika melebihi limit baru (90)
+if (newSlides[activeSlide].text.length > limitWithImage) {
+newSlides[activeSlide].text = newSlides[activeSlide].text.slice(0, limitWithImage);
+}
+
+setSlides(newSlides);
+};
+reader.readAsDataURL(file);
+}
+};
+
+const removeContentImage = () => {
+const newSlides = [...slides];
+newSlides[activeSlide].image = null;
+// Tidak perlu mengubah teks saat gambar dihapus (limit jadi longgar)
+setSlides(newSlides);
+};
+
+// --- CANVAS DRAWING LOGIC ---
+const drawImageOnCanvas = (ctx, imgSrc, x, y, width, height, options = {}) => {
+return new Promise((resolve) => {
+if (!imgSrc) { resolve(); return; }
+const img = new Image();
+img.crossOrigin = "anonymous";
+img.onload = () => {
+if (options.isCircle) {
+ctx.save();
+ctx.beginPath();
+ctx.arc(x + width / 2, y + height / 2, width / 2, 0, Math.PI * 2);
+ctx.closePath();
+ctx.clip();
+ctx.drawImage(img, x, y, width, height);
+ctx.restore();
+} else if (options.fit) {
+const imgRatio = img.width / img.height;
+const canvasRatio = width / height;
+let sWidth, sHeight, sx, sy;
+if (imgRatio > canvasRatio) {
+sHeight = img.height;
+sWidth = img.height * canvasRatio;
+sx = (img.width - sWidth) / 2;
+sy = 0;
+} else {
+sWidth = img.width;
+sHeight = img.width / canvasRatio;
+sx = 0;
+sy = (img.height - sHeight) / 2;
+}
+ctx.drawImage(img, sx, sy, sWidth, sHeight, x, y, width, height);
+} else {
+const ratio = img.width / img.height;
+let drawWidth = width;
+let drawHeight = width / ratio;
+if (drawHeight > height) { drawHeight = height; drawWidth = height * ratio; }
+ctx.drawImage(img, x + (width - drawWidth), y + (height - drawHeight), drawWidth, drawHeight);
+}
+resolve();
+};
+img.src = imgSrc;
+});
+};
+
+const generateSingleSlide = async (slideIndex) => {
+const canvas = canvasRef.current;
+const ctx = canvas.getContext('2d');
+const slide = slides[slideIndex];
+const isFirstSlide = slideIndex === 0;
+
+const canvasW = 1080;
+const canvasH = 1350;
+canvas.width = canvasW;
+canvas.height = canvasH;
+
+// 1. Background
+ctx.fillStyle = bgColor;
+ctx.fillRect(0, 0, canvasW, canvasH);
+
+const margin = 80;
+let contentStartY = margin; 
+
+// 2. Header (Only for Slide 1)
+if (isFirstSlide) {
+const pSize = 140;
+const pX = margin;
+const pY = margin;
+
+if (profileImg) {
+await drawImageOnCanvas(ctx, profileImg, pX, pY, pSize, pSize, { isCircle: true });
+} else {
+ctx.beginPath();
+ctx.arc(pX + pSize/2, pY + pSize/2, pSize/2, 0, Math.PI * 2);
+ctx.fillStyle = '#3b82f6';
+ctx.fill();
+ctx.fillStyle = '#ffffff';
+ctx.font = 'bold 70px sans-serif';
+ctx.textAlign = 'center';
+ctx.textBaseline = 'middle';
+ctx.fillText('J', pX + pSize/2, pY + pSize/2);
+}
+
+ctx.textAlign = 'left';
+ctx.fillStyle = textColor;
+ctx.font = 'bold 54px sans-serif';
+ctx.textBaseline = 'middle';
+ctx.fillText(accountName, pX + pSize + 40, pY + pSize/2);
+
+contentStartY = pY + pSize + 60;
+} else {
+contentStartY = margin + 40; 
+}
+
+// 3. Page Numbering
+if (slides.length > 1) {
+const pageText = `${slideIndex + 1}/${slides.length}`;
+ctx.font = 'bold 36px sans-serif';
+ctx.fillStyle = textColor;
+ctx.textAlign = 'right';
+ctx.textBaseline = 'top';
+ctx.globalAlpha = 0.7;
+ctx.fillText(pageText, canvasW - margin, margin);
+ctx.globalAlpha = 1.0;
+}
+
+// 4. Content Image (16:9)
+if (slide.image) {
+const cW = canvasW - (margin * 2);
+const cH = cW * (9/16);
+const cX = margin;
+const cY = contentStartY;
+
+ctx.save();
+const r = 30;
+ctx.beginPath();
+ctx.moveTo(cX + r, cY);
+ctx.lineTo(cX + cW - r, cY);
+ctx.quadraticCurveTo(cX + cW, cY, cX + cW, cY + r);
+ctx.lineTo(cX + cW, cY + cH - r);
+ctx.quadraticCurveTo(cX + cW, cY + cH, cX + cW - r, cY + cH);
+ctx.lineTo(cX + r, cY + cH);
+ctx.quadraticCurveTo(cX, cY + cH, cX, cY + cH - r);
+ctx.lineTo(cX, cY + r);
+ctx.quadraticCurveTo(cX, cY, cX + r, cY);
+ctx.closePath();
+ctx.clip();
+
+await drawImageOnCanvas(ctx, slide.image, cX, cY, cW, cH, { fit: true });
+ctx.restore();
+
+contentStartY = cY + cH + 60;
+}
+
+// 5. Watermark (Bottom Right)
+const wSize = 150; 
+const wPadding = 50; 
+const wX = canvasW - wSize - wPadding;
+const wY = canvasH - wSize - wPadding;
+
+if (watermarkImg) {
+// Putih jika BG gelap, Abu-abu (#CBD5E1) jika BG Putih
+const isLightBg = bgColor === '#ffffff' || bgColor === '#F4F6FA';
+const circleColor = isLightBg ? '#CBD5E1' : '#ffffff';
+
+const centerX = wX + (wSize / 2);
+const centerY = wY + (wSize / 2);
+const circleRadius = (wSize / 2) + 10; 
+
+ctx.beginPath();
+ctx.arc(centerX, centerY, circleRadius, 0, Math.PI * 2);
+ctx.fillStyle = circleColor;
+ctx.fill();
+
+await drawImageOnCanvas(ctx, watermarkImg, wX, wY, wSize, wSize, { fit: false });
+}
+
+// 6. Text (Fixed Font Size 20)
+const safeZoneY = watermarkImg ? (wY - 40) : (canvasH - margin);
+ctx.font = `${fixedFontSize * 2.2}px sans-serif`; // 20 * 2.2 = 44px
+ctx.fillStyle = textColor;
+ctx.textBaseline = 'top';
+ctx.textAlign = 'left';
+
+const words = slide.text.split(' ');
+let line = '';
+let x = margin;
+let y = contentStartY;
+const maxWidth = canvasW - (margin * 2);
+const lineHeight = fixedFontSize * 3.4; 
+
+for (let n = 0; n < words.length; n++) {
+let testLine = line + words[n] + ' ';
+let metrics = ctx.measureText(testLine);
+if (metrics.width > maxWidth && n > 0) {
+if (y + lineHeight > safeZoneY) break; 
+ctx.fillText(line, x, y);
+line = words[n] + ' ';
+y += lineHeight;
+} else {
+line = testLine;
+}
+}
+if (y + lineHeight <= safeZoneY) {
+ctx.fillText(line, x, y);
+}
+
+return canvas.toDataURL('image/png');
+};
+
+const downloadAllSlides = async () => {
+setIsGenerating(true);
+for (let i = 0; i < slides.length; i++) {
+const dataUrl = await generateSingleSlide(i);
+const link = document.createElement('a');
+link.download = `JukiMedia-Slide-${i + 1}-of-${slides.length}.png`;
+link.href = dataUrl;
+link.click();
+await new Promise(r => setTimeout(r, 800));
+}
+setIsGenerating(false);
+};
+
+const handleProfileUpload = (e) => {
+const file = e.target.files[0];
+if (file) {
+const reader = new FileReader();
+reader.onload = (ev) => setProfileImg(ev.target.result);
+reader.readAsDataURL(file);
+}
+};
+
+const handleWatermarkUpload = (e) => {
+const file = e.target.files[0];
+if (file) {
+const reader = new FileReader();
+reader.onload = (ev) => setWatermarkImg(ev.target.result);
+reader.readAsDataURL(file);
+}
+};
+
+const currentLimit = getCurrentLimit(slides[activeSlide]);
+
+return (
+<div className="min-h-screen bg-[#F0F2F5] p-4 md:p-8 font-sans text-slate-800">
+<div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+{/* PANEL KIRI (EDITOR) */}
+<div className="lg:col-span-5 bg-white p-6 rounded-3xl shadow-lg border border-slate-200 space-y-6">
+<div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+<div className="p-2 bg-[#151D7C] rounded-lg">
+<Layers className="text-white" size={24} />
+</div>
+<div>
+<h1 className="text-xl font-black italic text-[#151D7C] leading-none">JukiMedia<span className="text-[#B11226]">Multi</span></h1>
+<p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">Carousel Builder</p>
+</div>
+</div>
+
+{/* SLIDE NAVIGATION */}
+<div className="flex items-center justify-between bg-slate-50 p-2 rounded-xl border border-slate-200">
+<button 
+onClick={() => setActiveSlide(Math.max(0, activeSlide - 1))}
+disabled={activeSlide === 0}
+className="p-2 hover:bg-white rounded-lg disabled:opacity-30 transition-all"
+>
+<ChevronLeft size={20} />
+</button>
+<span className="text-xs font-black uppercase text-[#151D7C]">
+Editing Slide {activeSlide + 1} / {slides.length}
+</span>
+<button 
+onClick={() => setActiveSlide(Math.min(slides.length - 1, activeSlide + 1))}
+disabled={activeSlide === slides.length - 1}
+className="p-2 hover:bg-white rounded-lg disabled:opacity-30 transition-all"
+>
+<ChevronRight size={20} />
+</button>
+</div>
+
+{/* GLOBAL ASSETS */}
+<div className="grid grid-cols-2 gap-3">
+<div className="space-y-1 group">
+<label className="text-[10px] font-bold text-slate-400 uppercase">Profil (Slide 1 Only)</label>
+<div className="relative h-16 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden transition-all group-hover:border-blue-400 cursor-pointer">
+{profileImg ? (
+<img src={profileImg} className="w-full h-full object-cover" alt="P" onClick={() => setProfileImg(null)} />
+) : (
+<label className="w-full h-full flex items-center justify-center cursor-pointer">
+<Upload size={16} className="text-slate-300" />
+<input type="file" className="hidden" accept="image/*" onChange={handleProfileUpload} />
+</label>
+)}
+</div>
+</div>
+<div className="space-y-1 group">
+<label className="text-[10px] font-bold text-slate-400 uppercase">Logo (All Slides)</label>
+<div className="relative h-16 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden transition-all group-hover:border-blue-400 cursor-pointer">
+{watermarkImg ? (
+<img src={watermarkImg} className="w-full h-full object-contain p-2" alt="W" onClick={() => setWatermarkImg(null)} />
+) : (
+<label className="w-full h-full flex items-center justify-center cursor-pointer">
+<Upload size={16} className="text-slate-300" />
+<input type="file" className="hidden" accept="image/*" onChange={handleWatermarkUpload} />
+</label>
+)}
+</div>
+</div>
+</div>
+
+{/* CURRENT SLIDE CONTENT */}
+<div className="space-y-3 pt-4 border-t border-slate-100">
+<div className="flex justify-between items-center">
+<label className="text-xs font-bold text-[#151D7C] uppercase flex items-center gap-2">
+Konten Slide {activeSlide + 1}
+</label>
+
+<div className={`relative w-10 h-10 rounded-lg hover:bg-blue-100 cursor-pointer flex items-center justify-center border transition-colors ${slides[activeSlide].image ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-200'}`}>
+{slides[activeSlide].image ? (
+<img src={slides[activeSlide].image} className="w-full h-full object-cover rounded-lg" alt="S" onClick={removeContentImage} title="Hapus Gambar" />
+) : (
+<label className="cursor-pointer w-full h-full flex items-center justify-center" title="Upload Gambar (Batas teks jadi 90)">
+<ImageIcon size={16} className="text-slate-400" />
+<input type="file" className="hidden" accept="image/*" onChange={handleContentImageUpload} />
+</label>
+)}
+</div>
+</div>
+
+{/* Visual Indicator for Limit */}
+<div className={`text-[10px] font-bold px-2 py-1 rounded-md flex justify-between items-center ${slides[activeSlide].image ? 'bg-orange-50 text-orange-600' : 'bg-slate-100 text-slate-500'}`}>
+<span>{slides[activeSlide].image ? '⚠️ Mode Gambar (Limit 90)' : '📝 Mode Teks (Limit 380)'}</span>
+<span>{slides[activeSlide].text.length}/{currentLimit}</span>
+</div>
+
+<textarea
+className="w-full h-32 p-4 bg-slate-50 border rounded-2xl focus:border-[#151D7C] outline-none text-sm leading-relaxed"
+value={slides[activeSlide].text}
+onChange={(e) => updateSlideContent('text', e.target.value.slice(0, currentLimit))}
+placeholder={`Isi konten untuk slide ${activeSlide + 1}...`}
+/>
+</div>
+
+{/* SLIDE ACTIONS */}
+<div className="flex gap-2">
+<button onClick={addSlide} className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs flex items-center justify-center gap-1">
+<Plus size={14} /> TAMBAH SLIDE
+</button>
+<button onClick={() => removeSlide(activeSlide)} disabled={slides.length === 1} className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl font-bold disabled:opacity-50">
+<Trash2 size={16} />
+</button>
+</div>
+
+{/* GLOBAL SETTINGS */}
+<div className="space-y-4 pt-2 border-t border-slate-100">
+<div className="flex items-center justify-between">
+<div className="flex gap-1">
+{colorPalette.map((color) => (
+<button key={color} onClick={() => setBgColor(color)} className={`w-5 h-5 rounded-full ${bgColor === color ? 'ring-2 ring-offset-1 ring-blue-500' : 'opacity-50'}`} style={{ backgroundColor: color }} />
+))}
+</div>
+<div className="flex gap-1 bg-slate-100 p-1 rounded-md">
+<button onClick={() => setTextColor('#ffffff')} className={`px-2 py-1 rounded text-[9px] font-bold ${textColor === '#ffffff' ? 'bg-white shadow' : ''}`}>PUTIH</button>
+<button onClick={() => setTextColor('#000000')} className={`px-2 py-1 rounded text-[9px] font-bold ${textColor === '#000000' ? 'bg-white shadow' : ''}`}>HITAM</button>
+</div>
+</div>
+</div>
+
+<button onClick={downloadAllSlides} disabled={isGenerating} className="w-full py-4 bg-[#151D7C] text-white font-black rounded-2xl flex items-center justify-center gap-2 shadow-xl text-xs tracking-[0.2em]">
+{isGenerating ? <Loader2 className="animate-spin" /> : <><Download size={16} /> DOWNLOAD ALL ({slides.length})</>}
+</button>
+</div>
+
+{/* PANEL KANAN (PREVIEW) */}
+<div className="lg:col-span-7 flex flex-col items-center justify-start">
+<div className="bg-white px-5 py-2 rounded-full shadow-sm mb-6 flex items-center gap-2 border border-slate-100">
+<AlertCircle size={14} className="text-blue-600" />
+<span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+Preview Slide {activeSlide + 1} dari {slides.length}
+</span>
+</div>
+
+<div 
+className="w-full max-w-[420px] aspect-[4/5] rounded-[2rem] shadow-2xl overflow-hidden flex flex-col p-8 relative transition-all duration-300"
+style={{ backgroundColor: bgColor, color: textColor }}
+>
+{/* --- LAYOUT SLIDE 1 --- */}
+{activeSlide === 0 && (
+<div className="flex items-center gap-4 mb-8 shrink-0 animate-in fade-in duration-300">
+{profileImg ? (
+<img src={profileImg} className="w-16 h-16 rounded-full object-cover shadow-md ring-2 ring-white/30" alt="P" />
+) : (
+<div className="w-16 h-16 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-2xl shadow-md ring-2 ring-white/30">J</div>
+)}
+<div className="font-extrabold text-2xl tracking-tighter opacity-95">{accountName}</div>
+</div>
+)}
+
+{/* --- LAYOUT SLIDE 2+ (SPACER) --- */}
+{activeSlide > 0 && <div className="h-8"></div>}
+
+{/* Page Number Indicator */}
+{slides.length > 1 && (
+<div className="absolute top-8 right-8 text-2xl font-bold opacity-60">
+{activeSlide + 1}/{slides.length}
+</div>
+)}
+
+{/* Slide Content Image */}
+{slides[activeSlide].image && (
+<div className="w-full aspect-video mb-6 rounded-2xl overflow-hidden shadow-lg bg-black/10 shrink-0">
+<img src={slides[activeSlide].image} className="w-full h-full object-cover" alt="Status" />
+</div>
+)}
+
+{/* Text */}
+<div 
+className={`flex-grow leading-snug break-words overflow-hidden whitespace-pre-wrap font-medium ${watermarkImg ? 'pb-24' : ''}`}
+style={{ fontSize: `${fixedFontSize}px` }}
+>
+{slides[activeSlide].text || "Tuliskan sesuatu..."}
+</div>
+
+{/* Watermark with Circle Background */}
+{watermarkImg && (
+<div className={`absolute bottom-5 right-5 w-20 h-20 flex items-center justify-center rounded-full shadow-lg ${
+(bgColor === '#ffffff' || bgColor === '#F4F6FA') ? 'bg-slate-300' : 'bg-white'
+}`}>
+<div className="w-16 h-16 flex items-center justify-center p-1">
+<img src={watermarkImg} className="w-full h-full object-contain" alt="Logo" />
+</div>
+</div>
+)}
+</div>
+
+<div className="mt-8 flex gap-2">
+{slides.map((_, idx) => (
+<div 
+key={idx} 
+className={`w-2 h-2 rounded-full transition-all ${idx === activeSlide ? 'bg-[#151D7C] w-6' : 'bg-slate-300'}`} 
+/>
+))}
+</div>
+</div>
+</div>
+<canvas ref={canvasRef} className="hidden" />
+</div>
+);
+};
+
+export default App;
